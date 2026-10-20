@@ -4,9 +4,25 @@ set -euo pipefail
 ZERO_SHA="0000000000000000000000000000000000000000"
 EMPTY_TREE_SHA="4b825dc642cb6eb9a060e54bf8d69288fbee4904"
 
-head_sha="${INPUT_HEAD_SHA:-${EVENT_AFTER:-}}"
+head_sha="${INPUT_HEAD_SHA:-${PR_HEAD_SHA:-${EVENT_AFTER:-}}}"
 
-base_sha="${INPUT_BASE_SHA:-${EVENT_BEFORE:-}}"
+main_branch_ref="${INPUT_MAIN_BRANCH:-refs/heads/main}"
+current_ref="${CURRENT_REF:-}"
+
+if [ "$current_ref" = "$main_branch_ref" ]; then
+  parent_count="$(git rev-list --parents -n 1 "$head_sha" | awk '{print NF - 1}')"
+  if [ "$parent_count" -lt 2 ]; then
+    echo "Error: ${head_sha} is the tip of ${main_branch_ref} but is not a merge commit (${parent_count} parent(s)). Merges into ${main_branch_ref} must produce a merge commit." >&2
+    {
+      echo "## Export-Ignore Change Check"
+      echo
+      echo "❌ \`${head_sha}\` is the tip of \`${main_branch_ref}\` but is not a merge commit (${parent_count} parent(s))."
+    } >>"$GITHUB_STEP_SUMMARY"
+    exit 1
+  fi
+fi
+
+base_sha="${INPUT_BASE_SHA:-${PR_BASE_SHA:-${EVENT_BEFORE:-}}}"
 if [ -z "$base_sha" ] || [ "$base_sha" = "$ZERO_SHA" ] || ! git cat-file -e "${base_sha}^{commit}" 2>/dev/null; then
   echo "Note: base commit is unavailable or unresolvable, comparing only the last commit (${head_sha}^)." >&2
   base_sha="${head_sha}^"

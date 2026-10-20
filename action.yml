@@ -10,13 +10,23 @@ branding:
 inputs:
   base-sha:
     description: >
-      The base commit SHA to diff from. If omitted, defaults to github.event.before (falls back
-      to the parent of head-sha if github.event.before is the zero SHA or not resolvable, e.g. on
-      the first push to a branch or after a force-push).
+      The base commit SHA to diff from. If omitted, defaults to github.event.pull_request.base.sha
+      on pull_request events, otherwise github.event.before (falls back to the parent of head-sha
+      if that is the zero SHA or not resolvable, e.g. on the first push to a branch or after a
+      force-push).
     required: false
   head-sha:
-    description: 'The head commit SHA to diff to. If omitted, defaults to github.sha.'
+    description: >
+      The head commit SHA to diff to. If omitted, defaults to github.event.pull_request.head.sha
+      on pull_request events, otherwise github.sha.
     required: false
+  main-branch:
+    description: >
+      The ref that is expected to always be fast-forwarded via a merge commit (e.g. because
+      squash/rebase merges are disabled). When the workflow is running on this ref, the action
+      fails if head-sha is not a merge commit.
+    required: false
+    default: 'refs/heads/main'
 
 outputs:
   files_changed:
@@ -34,3 +44,7 @@ runs:
         INPUT_HEAD_SHA: ${{ inputs.head-sha }}
         EVENT_BEFORE: ${{ github.event.before }}
         EVENT_AFTER: ${{ github.sha }}
+        PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        INPUT_MAIN_BRANCH: ${{ inputs.main-branch }}
+        CURRENT_REF: ${{ github.ref }}

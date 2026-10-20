@@ -3,35 +3,48 @@ name: Test
 on:
   workflow_call:
   push:
+    branches:
+      - main
   pull_request:
   schedule:
     - cron: '0 6 * * 1'
   workflow_dispatch:
 
 jobs:
-  discover:
-    runs-on: ubuntu-latest
-    outputs:
-      cases: ${{ steps.cases.outputs.cases }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - id: cases
-        run: |
-          cases="$(find test/cases -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort | jq -R -s -c 'split("\n")[:-1]')"
-          echo "cases=$cases" >>"$GITHUB_OUTPUT"
-
   test:
-    needs: discover
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        case: ${{ fromJSON(needs.discover.outputs.cases) }}
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Run test case
+      - name: Run test cases
         shell: bash
-        run: test/run-test-case.sh "${{ matrix.case }}"
+        run: |
+          failed=()
+          for case_dir in test/cases/*/; do
+            case_name="$(basename "$case_dir")"
+            echo "::group::$case_name"
+            if ! test/run-test-case.sh "$case_name"; then
+              failed+=("$case_name")
+            fi
+            echo "::endgroup::"
+          done
+
+          if [ "${#failed[@]}" -eq 0 ]; then
+            echo "All test cases passed."
+            exit 0
+          fi
+
+          {
+            echo "### Failed test cases (${{ matrix.os }})"
+            printf -- '- `%s`\n' "${failed[@]}"
+          } >>"$GITHUB_STEP_SUMMARY"
+
+          echo "Failed test cases:"
+          for case_name in "${failed[@]}"; do
+            echo "::error title=Test case failed::$case_name"
+          done
+          exit 1
