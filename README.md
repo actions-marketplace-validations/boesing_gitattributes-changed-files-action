@@ -34,10 +34,38 @@ action — the action itself does not perform a checkout.
 
 ## Inputs
 
-| Name       | Required | Description                                                         |
-|------------|----------|---------------------------------------------------------------------|
-| `base-sha` | No       | The base commit SHA to diff from. Defaults to `github.event.before` |
-| `head-sha` | No       | The head commit SHA to diff to. Defaults to `github.sha`.           |
+| Name          | Required | Description                                                                                                                                    |
+|---------------|----------|------------------------------------------------------------------------------------------------------------------------------------------------|
+| `base-sha`    | No       | The base commit SHA to diff from. Defaults to `github.event.pull_request.base.sha` on `pull_request` events, otherwise `github.event.before`.  |
+| `head-sha`    | No       | The head commit SHA to diff to. Defaults to `github.event.pull_request.head.sha` on `pull_request` events, otherwise `github.sha`.             |
+| `main-branch` | No       | The ref that must always be fast-forwarded via a merge commit (e.g. because squash/rebase merges are disabled). Defaults to `refs/heads/main`. |
+
+### Diffing on `pull_request` events
+
+`github.event.before`/`github.sha` are `push`-event fields — a `pull_request` event payload has
+no `before` at all, and `github.sha` is the SHA of the ephemeral `refs/pull/<n>/merge` ref, not
+necessarily the PR's actual last commit. Relying on those defaults on a `pull_request` run means
+the action would fall back to diffing only the last commit against its parent (see below),
+silently missing earlier commits in a multi-commit PR whose latest commit only touches
+export-ignored paths.
+
+To always get the full diff against the PR's target branch regardless of how many commits the PR
+has, the action detects `pull_request` events and prefers
+`github.event.pull_request.base.sha`/`github.event.pull_request.head.sha` over
+`github.event.before`/`github.sha` automatically — no extra input needed.
+
+### Requiring a merge commit on `main`
+
+If your branch protection rules only allow "Create a merge commit" (squash and rebase merges
+disabled) for a given branch, every push to that branch is expected to land a real, two-parent
+merge commit — a plain, linear commit landing directly on it (e.g. from a bypassed protection rule
+or a different merge strategy actually being used) indicates something went through that
+shouldn't have.
+
+When the workflow run's ref (`github.ref`) matches `main-branch` (default `refs/heads/main`), the
+action fails the step outright if `head-sha` is not a merge commit, instead of silently reporting
+`files_changed`. This check only runs when the current ref equals `main-branch`; it never fires on
+`pull_request` runs, since `github.ref` there is the PR's merge ref, not the target branch.
 
 ## Outputs
 
@@ -94,6 +122,17 @@ Run all cases:
 ```bash
 for case_dir in test/cases/*/; do test/run-test-case.sh "$(basename "$case_dir")"; done
 ```
+
+Most cases just provide `base/` and `head*/` directory snapshots (one commit each, in order) plus
+an `expected.json` with `files_changed`. A case can add a `base-sha-override` file (literal SHA)
+or an `env.sh` file (sourced with `$STAGE_SHA_<stage>` commit SHAs available, e.g.
+`$STAGE_SHA_base`, `$STAGE_SHA_head`) to override any of the env vars the composite action passes
+to the script (`INPUT_BASE_SHA`, `INPUT_HEAD_SHA`, `EVENT_BEFORE`, `EVENT_AFTER`, `PR_BASE_SHA`,
+`PR_HEAD_SHA`, `INPUT_MAIN_BRANCH`, `CURRENT_REF`) — e.g. to simulate a `pull_request` event or a
+push to `main`. A case whose git topology the generic snapshot commits can't express (e.g. an
+actual merge commit) can provide a `setup.sh` instead, with full control over the repo at
+`$work_dir`; it must set `base_sha`/`head_sha` itself. `expected.json` may use `"exit_code"`
+instead of/in addition to `"files_changed"` to assert that the action fails outright.
 
 ## License
 
